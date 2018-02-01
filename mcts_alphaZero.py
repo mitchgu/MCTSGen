@@ -167,7 +167,7 @@ class MCTS(object):
             action, node = node.select(self._c_puct)            
             state.update(action)
 
-        if state.data.tobytes() in self._visited:
+        if state.data.tobytes() in self._visited and node._parent:
             node._parent._children.pop(action) # remove this node
             return # Don't update anything      
 
