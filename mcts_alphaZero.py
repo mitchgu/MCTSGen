@@ -13,6 +13,9 @@ import random
 
 # assume the policy_value_fn works
 
+def bs_policy_value_function(board):
+    return random.uniform(0, 1), np.zeros((28,28,1))
+
 def policy_value_fn(board):
     # given board outputs actions, probabilities and scores
     width = board.width
@@ -110,7 +113,7 @@ class TreeNode(object):
         """
         # If it is not root, this node's parent should be updated first.
         if self._parent:
-            self._parent.update_recursive(-leaf_value)
+            self._parent.update_recursive(leaf_value)
         self.update(leaf_value)
 
     def get_value(self, c_puct):
@@ -147,6 +150,7 @@ class MCTS(object):
         self._policy = policy_value_fn
         self._c_puct = c_puct
         self._n_playout = n_playout
+        self._visited = set()
 
     def _playout(self, state):
         """Run a single playout from the root to the leaf, getting a value at the leaf and
@@ -163,18 +167,25 @@ class MCTS(object):
             action, node = node.select(self._c_puct)            
             state.update(action)
 
+        if state.data.tobytes() in self._visited:
+            node._parent._children.pop(action) # remove this node
+            return # Don't update anything      
+
         # Evaluate the leaf using a network which outputs a list of (action, probability)
         # tuples p and also a score v in [-1, 1] for the current player.
         
-        action_probs, leaf_value = self._policy(state)
+        leaf_value, _ = self._policy(state)
+        action_probs = state.get_actions()
+
 
         # Check for end of game.
         end = state.end()
         if not end:
             node.expand(action_probs)
+            self._visited.add(state.data.tobytes())
 
         # Update value and visit count of nodes in this traversal.
-        node.update_recursive(-leaf_value)
+        node.update_recursive(leaf_value)
 
     def get_move_probs(self, state, temp=1e-3):
         """Runs all playouts sequentially and returns the available actions and their corresponding probabilities 
@@ -185,7 +196,7 @@ class MCTS(object):
         the available actions and the corresponding probabilities 
         """        
         for n in range(self._n_playout):
-            state_copy = copy.deepcopy(state)
+            state_copy = state.copy()
             self._playout(state_copy)
   
         # calc the move probabilities based on the visit counts at the root node
@@ -195,61 +206,75 @@ class MCTS(object):
          
         return acts, act_probs
 
-    def update_with_move(self, last_move):
+    def update_with_move(self, last_move, state):
         """Step forward in the tree, keeping everything we already know about the subtree.
         """
         if last_move in self._root._children:
             self._root = self._root._children[last_move]
             self._root._parent = None
+            state.update(last_move)
         else:
             self._root = TreeNode(None, 1.0)
+        # self._visited = _set()
 
     def __str__(self):
         return "MCTS"
         
-
 class Game(object):
     """AI player based on MCTS"""
-    def __init__(self, policy_value_function, c_puct=5, n_playout=2000, is_selfplay=0):
+    def __init__(self, policy_value_function, c_puct=5, n_playout=2000):
         self.mcts = MCTS(policy_value_function, c_puct, n_playout)
-        self._is_selfplay = is_selfplay
 
-    def get_action(self, board, temp=1e-3, return_prob=0):
-        n_sensible_nodes = len(board.nodes.keys())
-        move_probs = np.zeros((n_sensible_nodes,5)) # the pi vector returned by MCTS as in the alphaGo Zero paper
-        if n_sensible_nodes < board.width*board.height:
-            acts, probs = self.mcts.get_move_probs(board, temp)
-            move_probs[list(acts)] = probs         
-            if self._is_selfplay:
-                # add Dirichlet Noise for exploration (needed for self-play training)
-                move = np.random.choice(acts, p=0.75*probs + 0.25*np.random.dirichlet(0.3*np.ones(len(probs))))    
-                self.mcts.update_with_move(move) # update the root node and reuse the search tree
-            else:
-                # with the default temp=1e-3, this is almost equivalent to choosing the move with the highest prob
-                move = np.random.choice(acts, p=probs)       
-                # reset the root node
-                self.mcts.update_with_move(-1)             
-#                location = board.move_to_location(move)
-#                print("AI move: %d,%d\n" % (location[0], location[1]))
+    def step(self, board, temp=1e-3, return_prob=0):
+        acts, probs = self.mcts.get_move_probs(board, temp)
+        # add Dirichlet Noise for exploration (needed for self-play training)
+        move_i = np.random.choice(np.arange(len(acts)), p=0.75*probs + 0.25*np.random.dirichlet(0.3*np.ones(len(probs))))
+        # print(acts[move_i])
+        self.mcts.update_with_move(acts[move_i], board) # update the root node and reuse the search tree
+
+
+# class Game(object):
+#     """AI player based on MCTS"""
+#     def __init__(self, policy_value_function, c_puct=5, n_playout=2000, is_selfplay=0):
+#         self.mcts = MCTS(policy_value_function, c_puct, n_playout)
+#         self._is_selfplay = is_selfplay
+
+#     def get_action(self, board, temp=1e-3, return_prob=0):
+#         n_sensible_nodes = len(board.nodes.keys())
+#         move_probs = np.zeros((n_sensible_nodes,5)) # the pi vector returned by MCTS as in the alphaGo Zero paper
+#         if n_sensible_nodes < board.width*board.height:
+#             acts, probs = self.mcts.get_move_probs(board, temp)
+#             move_probs[list(acts)] = probs         
+#             if self._is_selfplay:
+#                 # add Dirichlet Noise for exploration (needed for self-play training)
+#                 move = np.random.choice(acts, p=0.75*probs + 0.25*np.random.dirichlet(0.3*np.ones(len(probs))))    
+#                 self.mcts.update_with_move(move) # update the root node and reuse the search tree
+#             else:
+#                 # with the default temp=1e-3, this is almost equivalent to choosing the move with the highest prob
+#                 move = np.random.choice(acts, p=probs)       
+#                 # reset the root node
+#                 self.mcts.update_with_move(-1)             
+# #                location = board.move_to_location(move)
+# #                print("AI move: %d,%d\n" % (location[0], location[1]))
                 
-            if return_prob:
-                return move, move_probs
-            else:
-                return move
-        else:            
-            print("WARNING: the board is fully split")
+#             if return_prob:
+#                 return move, move_probs
+#             else:
+#                 return move
+#         else:            
+#             print("WARNING: the board is fully split")
 
-    def __str__(self):
-        return "MCTS {}".format(self.player)    
+#     def __str__(self):
+#         return "MCTS {}".format(self.player)    
 
-size = 128
-image = Board(size, size)
+# size = 128
+# image = Board(size, size)
 
-for i in range(10):
-    image.start_play()
-    policy = policy_value_fn(image)
-print(policy[0])
-print(policy[1])
+# for i in range(10):
+#     image.start_play()
+#     policy = policy_value_fn(image)
+# print(policy[0])
+# print(policy[1])
 
 # game = Game(policy)
 # move = game.get_action(image)

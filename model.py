@@ -14,8 +14,8 @@ def conv_out_size_same(size, stride):
 
 class DCGAN(object):
   def __init__(self, sess, input_height=28, input_width=28, crop=True,
-         batch_size=64, sample_num = 64, output_height=28, output_width=28,
-         y_dim=10, z_dim=100, gf_dim=64, df_dim=64,
+         batch_size=1, sample_num = 1, output_height=28, output_width=28,
+         y_dim=10, z_dim=100, gf_dim=1, df_dim=1,
          gfc_dim=1024, dfc_dim=1024, c_dim=3, dataset_name='mnist',
          input_fname_pattern='*.jpg', checkpoint_dir='checkpoint', sample_dir='samples'):
     """
@@ -84,9 +84,9 @@ class DCGAN(object):
 
     self.build_model()
 
-    success, counter = self.load(self.checkpoint_dir)
-    if not success:
-      raise Exception("Unable to load pretrained discriminator from checkpoints")
+    # success, counter = self.load(self.checkpoint_dir)
+    # if not success:
+    #   raise Exception("Unable to load pretrained discriminator from checkpoints")
     
     np.random.seed()
 
@@ -458,9 +458,9 @@ class DCGAN(object):
         return tf.nn.sigmoid(deconv2d(h2, [self.batch_size, s_h, s_w, self.c_dim], name='g_h3'))
 
   def run_policy(self, samples, y):
-    y = np.random.choice(10, 64)
-    y_one_hot = np.zeros((64, 10))
-    y_one_hot[np.arange(64), y] = 1
+    y = np.random.choice(10, self.batch_size)
+    y_one_hot = np.zeros((self.batch_size, 10))
+    y_one_hot[np.arange(self.batch_size), y] = 1
 
     v, grad = self.sess.run([self.D, self.grad], feed_dict={
       self.inputs: samples,
